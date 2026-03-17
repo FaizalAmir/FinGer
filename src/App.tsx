@@ -12,9 +12,6 @@ import BudgetsView from './views/BudgetsView';
 import DebtsView from './views/DebtsView';
 import CategoriesView from './views/CategoriesView';
 import BottomNav from './components/BottomNav';
-//
-// const apiUrl = import.meta.env.VITE_API_URL;
-// const appTitle = import.meta.env.VITE_APP_TITLE;
 
 function MainApp() {
   const { user } = useFinance();

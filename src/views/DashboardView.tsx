@@ -1,50 +1,10 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { useFinance } from '../FinanceContext';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
-import { ArrowDownRight, ArrowUpRight, Wallet, LogOut, TrendingUp, TrendingDown, CloudUpload, CloudDownload, Loader2, CheckCircle, XCircle } from 'lucide-react';
+import { ArrowDownRight, ArrowUpRight, Wallet, LogOut, TrendingUp, TrendingDown } from 'lucide-react';
 
 export default function DashboardView() {
-  const { user, categories, logout, backupToSupabase, restoreFromSupabase, dashboardStats } = useFinance();
-  const [isBackingUp, setIsBackingUp] = useState(false);
-  const [isRestoring, setIsRestoring] = useState(false);
-  const [showRestoreConfirm, setShowRestoreConfirm] = useState(false);
-  const [backupStatus, setBackupStatus] = useState<'idle' | 'success' | 'error'>('idle');
-  const [backupMessage, setBackupMessage] = useState('');
-
-  const handleBackup = async () => {
-    setIsBackingUp(true);
-    setBackupStatus('idle');
-    const result = await backupToSupabase();
-    setIsBackingUp(false);
-    
-    if (result.success) {
-      setBackupStatus('success');
-      setBackupMessage(result.message || 'Backup successful!');
-      setTimeout(() => setBackupStatus('idle'), 3000);
-    } else {
-      setBackupStatus('error');
-      setBackupMessage(result.error || 'Backup failed');
-      setTimeout(() => setBackupStatus('idle'), 5000);
-    }
-  };
-
-  const handleRestore = async () => {
-    setIsRestoring(true);
-    setShowRestoreConfirm(false);
-    setBackupStatus('idle');
-    const result = await restoreFromSupabase();
-    setIsRestoring(false);
-    
-    if (result.success) {
-      setBackupStatus('success');
-      setBackupMessage(result.message || 'Restore successful!');
-      setTimeout(() => setBackupStatus('idle'), 3000);
-    } else {
-      setBackupStatus('error');
-      setBackupMessage(result.error || 'Restore failed');
-      setTimeout(() => setBackupStatus('idle'), 5000);
-    }
-  };
+  const { user, categories, logout, dashboardStats } = useFinance();
 
   const totalIncome = dashboardStats?.totalIncome || 0;
   const totalExpense = dashboardStats?.totalExpense || 0;
@@ -83,63 +43,11 @@ export default function DashboardView() {
           <h1 className="text-2xl font-bold text-gray-900">{user?.name}</h1>
         </div>
         <div className="flex items-center space-x-2">
-          <button 
-            onClick={() => setShowRestoreConfirm(true)} 
-            disabled={isRestoring || isBackingUp}
-            title="Restore from Supabase"
-            className="p-2 bg-white rounded-full shadow-sm text-emerald-600 hover:text-emerald-800 hover:bg-emerald-50 transition-colors disabled:opacity-50"
-          >
-            {isRestoring ? <Loader2 size={20} className="animate-spin" /> : <CloudDownload size={20} />}
-          </button>
-          <button 
-            onClick={handleBackup} 
-            disabled={isBackingUp || isRestoring}
-            title="Backup to Supabase"
-            className="p-2 bg-white rounded-full shadow-sm text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50 transition-colors disabled:opacity-50"
-          >
-            {isBackingUp ? <Loader2 size={20} className="animate-spin" /> : <CloudUpload size={20} />}
-          </button>
           <button onClick={logout} className="p-2 bg-white rounded-full shadow-sm text-gray-400 hover:text-gray-600 transition-colors">
             <LogOut size={20} />
           </button>
         </div>
       </div>
-
-      {/* Restore Confirmation Modal */}
-      {showRestoreConfirm && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl p-6 max-w-sm w-full shadow-xl">
-            <h3 className="text-lg font-bold text-gray-900 mb-2">Restore Data?</h3>
-            <p className="text-sm text-gray-600 mb-6">
-              This will download your data from the cloud and overwrite any local changes. Are you sure you want to proceed?
-            </p>
-            <div className="flex justify-end space-x-3">
-              <button 
-                onClick={() => setShowRestoreConfirm(false)}
-                className="px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 rounded-xl transition-colors"
-              >
-                Cancel
-              </button>
-              <button 
-                onClick={handleRestore}
-                className="px-4 py-2 text-sm font-medium text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl transition-colors"
-              >
-                Restore
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Backup Status Alert */}
-      {backupStatus !== 'idle' && (
-        <div className={`p-3 rounded-xl flex items-center space-x-2 text-sm font-medium ${
-          backupStatus === 'success' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-rose-50 text-rose-700 border border-rose-200'
-        }`}>
-          {backupStatus === 'success' ? <CheckCircle size={16} /> : <XCircle size={16} />}
-          <span>{backupMessage}</span>
-        </div>
-      )}
 
       {/* Budget Alerts Section */}
       {budgetAlerts.length > 0 && (

@@ -1,5 +1,6 @@
 import React, { createContext, useState, useContext, ReactNode, useEffect, useCallback } from 'react';
 import { Transaction, Debt, Category, User } from './types';
+import { supabase } from './supabaseClient';
 
 export interface DashboardStats {
   totalIncome: number;
@@ -48,63 +49,149 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
   const [dashboardStats, setDashboardStats] = useState<DashboardStats | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  const getHeaders = useCallback(() => {
-    return {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${token}`
-    };
-  }, [token]);
-
   const refreshDashboardStats = useCallback(async () => {
-    if (!token) return;
+    if (!user) return;
     try {
-      const res = await fetch('/api/dashboard-stats', { headers: getHeaders() });
-      if (res.ok) {
-        setDashboardStats(await res.json());
-      }
+      const { data: transactions } = await supabase
+        .from('transactions')
+        .select('*')
+        .eq('userid', user.id);
+        
+      const { data: cats } = await supabase
+        .from('categories')
+        .select('*')
+        .eq('userid', user.id);
+
+      if (!transactions || !cats) return;
+
+      const now = new Date();
+      const currentMonthStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+      
+      const previousMonth = now.getMonth() === 0 ? 11 : now.getMonth() - 1;
+      const previousMonthYear = now.getMonth() === 0 ? now.getFullYear() - 1 : now.getFullYear();
+      const prevMonthStr = `${previousMonthYear}-${String(previousMonth + 1).padStart(2, '0')}`;
+
+      let totalIncome = 0;
+      let totalExpense = 0;
+      let currentMonthIncome = 0;
+      let currentMonthExpense = 0;
+      let prevMonthIncome = 0;
+      let prevMonthExpense = 0;
+
+      const expensesByCategoryMap: Record<string, number> = {};
+      const currentMonthSpentByCategoryMap: Record<string, number> = {};
+      const past6MonthsSpentByCategoryMap: Record<string, Record<string, number>> = {};
+
+      const sixMonthsAgo = new Date();
+      sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 5);
+      sixMonthsAgo.setDate(1);
+      sixMonthsAgo.setHours(0, 0, 0, 0);
+
+      transactions.forEach(t => {
+        const amount = Number(t.amount);
+        if (t.type === 'income') {
+          totalIncome += amount;
+          if (t.date.startsWith(currentMonthStr)) currentMonthIncome += amount;
+          if (t.date.startsWith(prevMonthStr)) prevMonthIncome += amount;
+        } else if (t.type === 'expense') {
+          totalExpense += amount;
+          if (t.date.startsWith(currentMonthStr)) {
+            currentMonthExpense += amount;
+            currentMonthSpentByCategoryMap[t.categoryid] = (currentMonthSpentByCategoryMap[t.categoryid] || 0) + amount;
+          }
+          if (t.date.startsWith(prevMonthStr)) prevMonthExpense += amount;
+          
+          expensesByCategoryMap[t.categoryid] = (expensesByCategoryMap[t.categoryid] || 0) + amount;
+
+          const tDate = new Date(t.date);
+          if (tDate >= sixMonthsAgo) {
+            const monthStr = `${tDate.getFullYear()}-${String(tDate.getMonth() + 1).padStart(2, '0')}`;
+            if (!past6MonthsSpentByCategoryMap[t.categoryid]) past6MonthsSpentByCategoryMap[t.categoryid] = {};
+            past6MonthsSpentByCategoryMap[t.categoryid][monthStr] = (past6MonthsSpentByCategoryMap[t.categoryid][monthStr] || 0) + amount;
+          }
+        }
+      });
+
+      const expensesByCategory = Object.entries(expensesByCategoryMap).map(([id, value]) => {
+        const cat = cats.find(c => c.id === id);
+        return { id, name: cat?.name || 'Unknown', color: cat?.color || '#ccc', value };
+      }).filter(c => c.value > 0);
+
+      const currentMonthSpentByCategory = Object.entries(currentMonthSpentByCategoryMap).map(([categoryId, spent]) => ({ categoryId, spent }));
+      
+      const past6MonthsSpentByCategory: { categoryId: string; monthStr: string; spent: number }[] = [];
+      Object.entries(past6MonthsSpentByCategoryMap).forEach(([categoryId, months]) => {
+        Object.entries(months).forEach(([monthStr, spent]) => {
+          past6MonthsSpentByCategory.push({ categoryId, monthStr, spent });
+        });
+      });
+
+      setDashboardStats({
+        totalIncome,
+        totalExpense,
+        currentMonthIncome,
+        currentMonthExpense,
+        prevMonthIncome,
+        prevMonthExpense,
+        expensesByCategory,
+        currentMonthSpentByCategory,
+        past6MonthsSpentByCategory
+      });
     } catch (error) {
       console.error('Failed to fetch dashboard stats:', error);
     }
-  }, [token, getHeaders]);
+  }, [user]);
 
   const fetchData = useCallback(async () => {
-    if (!token) {
+    if (!user) {
       setIsLoading(false);
       return;
     }
     
     setIsLoading(true);
     try {
-      const [catRes, debtsRes, statsRes] = await Promise.all([
-        fetch('/api/categories', { headers: getHeaders() }),
-        fetch('/api/debts', { headers: getHeaders() }),
-        fetch('/api/dashboard-stats', { headers: getHeaders() })
-      ]);
+      const { data: cats } = await supabase.from('categories').select('*').eq('userid', user.id);
+      const { data: dbs } = await supabase.from('debts').select('*').eq('userid', user.id);
       
-      if (catRes.status === 401 || catRes.status === 403) {
-        logout();
-        return;
+      if (cats) {
+        setCategories(cats.map(c => ({
+          ...c,
+          categoryId: c.categoryid,
+          budgetAlertThreshold: c.budgetalertthreshold,
+          userId: c.userid
+        })));
       }
-
-      if (catRes.ok) setCategories(await catRes.json());
-      if (debtsRes.ok) setDebts(await debtsRes.json());
-      if (statsRes.ok) setDashboardStats(await statsRes.json());
+      if (dbs) {
+        setDebts(dbs.map(d => ({
+          ...d,
+          totalAmount: d.totalamount,
+          paidAmount: d.paidamount,
+          dueDate: d.duedate,
+          userId: d.userid
+        })));
+      }
+      await refreshDashboardStats();
     } catch (error) {
       console.error('Failed to fetch data:', error);
     } finally {
       setIsLoading(false);
     }
-  }, [token, getHeaders]);
+  }, [user, refreshDashboardStats]);
 
   useEffect(() => {
     const storedUser = localStorage.getItem('finance_user');
     if (token && storedUser) {
       setUser(JSON.parse(storedUser));
-      fetchData();
     } else {
       setIsLoading(false);
     }
-  }, [token, fetchData]);
+  }, [token]);
+
+  useEffect(() => {
+    if (user) {
+      fetchData();
+    }
+  }, [user, fetchData]);
 
   const login = (newToken: string, userData: User) => {
     localStorage.setItem('finance_token', newToken);
@@ -124,17 +211,26 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
   };
 
   const fetchTransactions = async (limit: number, offset: number, search?: string, type?: string) => {
+    if (!user) return { data: [], total: 0 };
     try {
-      const params = new URLSearchParams({
-        limit: limit.toString(),
-        offset: offset.toString()
-      });
-      if (search) params.append('search', search);
-      if (type && type !== 'all') params.append('type', type);
-
-      const res = await fetch(`/api/transactions?${params.toString()}`, { headers: getHeaders() });
-      if (res.ok) {
-        return await res.json();
+      let query = supabase.from('transactions').select('*', { count: 'exact' }).eq('userid', user.id);
+      
+      if (type && type !== 'all') {
+        query = query.eq('type', type);
+      }
+      if (search) {
+        query = query.ilike('note', `%${search}%`);
+      }
+      
+      query = query.order('date', { ascending: false }).range(offset, offset + limit - 1);
+      
+      const { data, count } = await query;
+      
+      if (data) {
+        return { 
+          data: data.map(t => ({...t, categoryId: t.categoryid, userId: t.userid})), 
+          total: count || 0 
+        };
       }
       return { data: [], total: 0 };
     } catch (error) {
@@ -144,14 +240,17 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
   };
 
   const fetchDebtPayments = async (debtId: string, limit: number, offset: number) => {
+    if (!user) return { data: [], total: 0 };
     try {
-      const params = new URLSearchParams({
-        limit: limit.toString(),
-        offset: offset.toString()
-      });
-      const res = await fetch(`/api/debts/${debtId}/payments?${params.toString()}`, { headers: getHeaders() });
-      if (res.ok) {
-        return await res.json();
+      const { data, count } = await supabase
+        .from('debt_payments')
+        .select('*', { count: 'exact' })
+        .eq('debtid', debtId)
+        .order('date', { ascending: false })
+        .range(offset, offset + limit - 1);
+        
+      if (data) {
+        return { data: data.map(d => ({...d, debtId: d.debtid})), total: count || 0 };
       }
       return { data: [], total: 0 };
     } catch (error) {
@@ -161,13 +260,18 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
   };
 
   const addTransaction = async (t: Omit<Transaction, 'id'>) => {
-    const newTransaction = { ...t, id: Math.random().toString(36).substr(2, 9) };
+    if (!user) return;
+    const newId = Math.random().toString(36).substr(2, 9);
     try {
-      await fetch('/api/transactions', {
-        method: 'POST',
-        headers: getHeaders(),
-        body: JSON.stringify(newTransaction)
-      });
+      await supabase.from('transactions').insert([{
+        id: newId,
+        userid: user.id,
+        amount: t.amount,
+        type: t.type,
+        categoryid: t.categoryId,
+        date: t.date,
+        note: t.note
+      }]);
       await refreshDashboardStats();
     } catch (error) {
       console.error('Failed to add transaction:', error);
@@ -175,12 +279,16 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
   };
 
   const editTransaction = async (id: string, updatedTransaction: Partial<Transaction>) => {
+    if (!user) return;
     try {
-      await fetch(`/api/transactions/${id}`, {
-        method: 'PUT',
-        headers: getHeaders(),
-        body: JSON.stringify(updatedTransaction)
-      });
+      const updateData: any = {};
+      if (updatedTransaction.amount !== undefined) updateData.amount = updatedTransaction.amount;
+      if (updatedTransaction.type !== undefined) updateData.type = updatedTransaction.type;
+      if (updatedTransaction.categoryId !== undefined) updateData.categoryid = updatedTransaction.categoryId;
+      if (updatedTransaction.date !== undefined) updateData.date = updatedTransaction.date;
+      if (updatedTransaction.note !== undefined) updateData.note = updatedTransaction.note;
+      
+      await supabase.from('transactions').update(updateData).eq('id', id).eq('userid', user.id);
       await refreshDashboardStats();
     } catch (error) {
       console.error('Failed to edit transaction:', error);
@@ -188,71 +296,85 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
   };
 
   const addDebt = async (d: Omit<Debt, 'id'>) => {
-    const newDebt = { ...d, id: Math.random().toString(36).substr(2, 9) };
+    if (!user) return;
+    const newId = Math.random().toString(36).substr(2, 9);
+    const newDebt = { ...d, id: newId };
     setDebts([...debts, newDebt]);
     
     try {
-      await fetch('/api/debts', {
-        method: 'POST',
-        headers: getHeaders(),
-        body: JSON.stringify(newDebt)
-      });
+      await supabase.from('debts').insert([{
+        id: newId,
+        userid: user.id,
+        name: d.name,
+        totalamount: d.totalAmount,
+        paidamount: d.paidAmount || 0,
+        duedate: d.dueDate,
+        note: d.note
+      }]);
     } catch (error) {
       console.error('Failed to add debt:', error);
     }
   };
 
   const editDebt = async (id: string, updatedDebt: Partial<Debt>) => {
+    if (!user) return;
     setDebts(debts.map(d => d.id === id ? { ...d, ...updatedDebt } : d));
     
     try {
-      await fetch(`/api/debts/${id}`, {
-        method: 'PUT',
-        headers: getHeaders(),
-        body: JSON.stringify(updatedDebt)
-      });
+      const updateData: any = {};
+      if (updatedDebt.name !== undefined) updateData.name = updatedDebt.name;
+      if (updatedDebt.totalAmount !== undefined) updateData.totalamount = updatedDebt.totalAmount;
+      if (updatedDebt.paidAmount !== undefined) updateData.paidamount = updatedDebt.paidAmount;
+      if (updatedDebt.dueDate !== undefined) updateData.duedate = updatedDebt.dueDate;
+      if (updatedDebt.note !== undefined) updateData.note = updatedDebt.note;
+      
+      await supabase.from('debts').update(updateData).eq('id', id).eq('userid', user.id);
     } catch (error) {
       console.error('Failed to edit debt:', error);
     }
   };
 
   const addDebtPayment = async (debtId: string, amount: number, date: string, note?: string) => {
-    const newPayment = { id: Math.random().toString(36).substr(2, 9), amount, date, note };
+    if (!user) return;
+    const newId = Math.random().toString(36).substr(2, 9);
     
     try {
-      await fetch(`/api/debts/${debtId}/payments`, {
-        method: 'POST',
-        headers: getHeaders(),
-        body: JSON.stringify(newPayment)
-      });
+      await supabase.from('debt_payments').insert([{
+        id: newId,
+        debtid: debtId,
+        amount,
+        date,
+        note
+      }]);
       
-      setDebts(debts.map(d => {
-        if (d.id === debtId) {
-          return {
-            ...d,
-            paidAmount: d.paidAmount + amount,
-            // We no longer need to maintain payments array here since it's lazy loaded
-          };
-        }
-        return d;
-      }));
+      const debt = debts.find(d => d.id === debtId);
+      if (debt) {
+        const newPaidAmount = debt.paidAmount + amount;
+        await supabase.from('debts').update({ paidamount: newPaidAmount }).eq('id', debtId).eq('userid', user.id);
+        setDebts(debts.map(d => d.id === debtId ? { ...d, paidAmount: newPaidAmount } : d));
+      }
     } catch (error) {
       console.error('Failed to add debt payment:', error);
     }
   };
 
   const editDebtPayment = async (debtId: string, paymentId: string, amount: number, date: string, note?: string) => {
+    if (!user) return;
     try {
-      await fetch(`/api/debts/${debtId}/payments/${paymentId}`, {
-        method: 'PUT',
-        headers: getHeaders(),
-        body: JSON.stringify({ amount, date, note })
-      });
+      const { data: oldPayment } = await supabase.from('debt_payments').select('amount').eq('id', paymentId).single();
+      if (!oldPayment) return;
       
-      // Refresh debts to get updated paidAmount
-      const res = await fetch('/api/debts', { headers: getHeaders() });
-      if (res.ok) {
-        setDebts(await res.json());
+      const amountDiff = amount - oldPayment.amount;
+      
+      await supabase.from('debt_payments').update({ amount, date, note }).eq('id', paymentId);
+      
+      if (amountDiff !== 0) {
+        const debt = debts.find(d => d.id === debtId);
+        if (debt) {
+          const newPaidAmount = debt.paidAmount + amountDiff;
+          await supabase.from('debts').update({ paidamount: newPaidAmount }).eq('id', debtId).eq('userid', user.id);
+          setDebts(debts.map(d => d.id === debtId ? { ...d, paidAmount: newPaidAmount } : d));
+        }
       }
     } catch (error) {
       console.error('Failed to edit debt payment:', error);
@@ -260,16 +382,18 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
   };
 
   const deleteDebtPayment = async (debtId: string, paymentId: string) => {
+    if (!user) return;
     try {
-      await fetch(`/api/debts/${debtId}/payments/${paymentId}`, {
-        method: 'DELETE',
-        headers: getHeaders()
-      });
+      const { data: oldPayment } = await supabase.from('debt_payments').select('amount').eq('id', paymentId).single();
+      if (!oldPayment) return;
       
-      // Refresh debts to get updated paidAmount
-      const res = await fetch('/api/debts', { headers: getHeaders() });
-      if (res.ok) {
-        setDebts(await res.json());
+      await supabase.from('debt_payments').delete().eq('id', paymentId);
+      
+      const debt = debts.find(d => d.id === debtId);
+      if (debt) {
+        const newPaidAmount = debt.paidAmount - oldPayment.amount;
+        await supabase.from('debts').update({ paidamount: newPaidAmount }).eq('id', debtId).eq('userid', user.id);
+        setDebts(debts.map(d => d.id === debtId ? { ...d, paidAmount: newPaidAmount } : d));
       }
     } catch (error) {
       console.error('Failed to delete debt payment:', error);
@@ -277,15 +401,22 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
   };
 
   const addCategory = async (c: Omit<Category, 'id'>) => {
-    const newCategory = { ...c, id: Math.random().toString(36).substr(2, 9) };
+    if (!user) return;
+    const newId = Math.random().toString(36).substr(2, 9);
+    const newCategory = { ...c, id: newId };
     setCategories([...categories, newCategory]);
     
     try {
-      await fetch('/api/categories', {
-        method: 'POST',
-        headers: getHeaders(),
-        body: JSON.stringify(newCategory)
-      });
+      await supabase.from('categories').insert([{
+        id: newId,
+        userid: user.id,
+        name: c.name,
+        type: c.type,
+        color: c.color,
+        icon: c.icon,
+        budget: c.budget,
+        budgetalertthreshold: c.budgetAlertThreshold
+      }]);
       await refreshDashboardStats();
     } catch (error) {
       console.error('Failed to add category:', error);
@@ -293,14 +424,19 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
   };
 
   const editCategory = async (id: string, updatedCategory: Partial<Category>) => {
+    if (!user) return;
     setCategories(categories.map(c => c.id === id ? { ...c, ...updatedCategory } : c));
     
     try {
-      await fetch(`/api/categories/${id}`, {
-        method: 'PUT',
-        headers: getHeaders(),
-        body: JSON.stringify(updatedCategory)
-      });
+      const updateData: any = {};
+      if (updatedCategory.name !== undefined) updateData.name = updatedCategory.name;
+      if (updatedCategory.type !== undefined) updateData.type = updatedCategory.type;
+      if (updatedCategory.color !== undefined) updateData.color = updatedCategory.color;
+      if (updatedCategory.icon !== undefined) updateData.icon = updatedCategory.icon;
+      if (updatedCategory.budget !== undefined) updateData.budget = updatedCategory.budget;
+      if (updatedCategory.budgetAlertThreshold !== undefined) updateData.budgetalertthreshold = updatedCategory.budgetAlertThreshold;
+      
+      await supabase.from('categories').update(updateData).eq('id', id).eq('userid', user.id);
       await refreshDashboardStats();
     } catch (error) {
       console.error('Failed to edit category:', error);
@@ -308,15 +444,18 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
   };
 
   const deleteCategory = async (id: string) => {
+    if (!user) return { success: false, error: 'Not logged in' };
     try {
-      const response = await fetch(`/api/categories/${id}`, {
-        method: 'DELETE',
-        headers: getHeaders(),
-      });
-      const data = await response.json();
+      const { count } = await supabase.from('transactions').select('*', { count: 'exact', head: true }).eq('categoryid', id).eq('userid', user.id);
       
-      if (!response.ok) {
-        return { success: false, error: data.error || 'Failed to delete category' };
+      if (count && count > 0) {
+        return { success: false, error: 'Cannot delete category because it has associated transactions.' };
+      }
+      
+      const { error } = await supabase.from('categories').delete().eq('id', id).eq('userid', user.id);
+      
+      if (error) {
+        return { success: false, error: error.message };
       }
       
       setCategories(categories.filter(c => c.id !== id));
@@ -328,38 +467,12 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
   };
 
   const backupToSupabase = async () => {
-    try {
-      const response = await fetch('/api/backup', {
-        method: 'POST',
-        headers: getHeaders(),
-      });
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.error || 'Backup failed');
-      }
-      return { success: true, message: data.message };
-    } catch (error: any) {
-      console.error('Backup error:', error);
-      return { success: false, error: error.message };
-    }
+    return { success: true, message: 'Data is already synced with Supabase' };
   };
 
   const restoreFromSupabase = async () => {
-    try {
-      const response = await fetch('/api/restore', {
-        method: 'POST',
-        headers: getHeaders(),
-      });
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.error || 'Restore failed');
-      }
-      await fetchData();
-      return { success: true, message: data.message };
-    } catch (error: any) {
-      console.error('Restore error:', error);
-      return { success: false, error: error.message };
-    }
+    await fetchData();
+    return { success: true, message: 'Data refreshed from Supabase' };
   };
 
   return (

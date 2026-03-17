@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { useFinance } from '../FinanceContext';
 import { Wallet, Loader2, Eye, EyeOff } from 'lucide-react';
+import { supabase } from '../supabaseClient';
+import bcrypt from 'bcryptjs';
 
 export default function LoginView() {
   const { login } = useFinance();
@@ -18,22 +20,51 @@ export default function LoginView() {
     setIsLoading(true);
 
     try {
-      const endpoint = isLogin ? '/api/auth/login' : '/api/auth/signup';
-      const body = isLogin ? { email, password } : { name, email, password };
+      if (isLogin) {
+        const { data: users, error: fetchError } = await supabase
+          .from('users')
+          .select('*')
+          .eq('email', email)
+          .limit(1);
 
-      const response = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
+        if (fetchError) throw fetchError;
+        if (!users || users.length === 0) throw new Error('Invalid credentials');
 
-      const data = await response.json();
+        const user = users[0];
+        const validPassword = await bcrypt.compare(password, user.password);
+        
+        if (!validPassword) throw new Error('Invalid credentials');
 
-      if (!response.ok) {
-        throw new Error(data.error || 'Authentication failed');
+        // Generate a simple token for local use
+        const token = btoa(JSON.stringify({ id: user.id, email: user.email, name: user.name, exp: Date.now() + 7 * 24 * 60 * 60 * 1000 }));
+        login(token, { id: user.id, name: user.name, email: user.email });
+      } else {
+        const { data: existingUsers } = await supabase
+          .from('users')
+          .select('email')
+          .eq('email', email)
+          .limit(1);
+
+        if (existingUsers && existingUsers.length > 0) {
+          throw new Error('Email already exists');
+        }
+
+        const hashedPassword = await bcrypt.hash(password, 10);
+        const id = Math.random().toString(36).substr(2, 9);
+
+        const { error: insertError } = await supabase.from('users').insert([{
+          id,
+          name,
+          email,
+          password: hashedPassword,
+          createdat: new Date().toISOString()
+        }]);
+
+        if (insertError) throw insertError;
+
+        const token = btoa(JSON.stringify({ id, email, name, exp: Date.now() + 7 * 24 * 60 * 60 * 1000 }));
+        login(token, { id, name, email });
       }
-
-      login(data.token, data.user);
     } catch (err: any) {
       setError(err.message);
     } finally {
