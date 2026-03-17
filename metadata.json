@@ -1,0 +1,5 @@
+{
+  "name": "Finance Manager",
+  "description": "Mobile-first financial management application with dashboard, transactions, and debts.",
+  "requestFramePermissions": []
+}
