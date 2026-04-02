@@ -4,7 +4,7 @@ import { Plus, Target, Edit2, AlertCircle, ArrowDown, ArrowUp, ChevronDown, Chev
 import { Category } from '../types';
 
 export default function BudgetsView() {
-  const { categories, dashboardStats, editCategory } = useFinance();
+  const { categories, dashboardStats, editCategory, formatCurrency } = useFinance();
   const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null);
   const [budgetAmount, setBudgetAmount] = useState('');
   const [alertThreshold, setAlertThreshold] = useState('80');
@@ -132,14 +132,14 @@ export default function BudgetsView() {
             <span className="text-sm font-medium">Total Budget (This Month)</span>
           </div>
           <div className="flex items-end space-x-2">
-            <h2 className="text-4xl font-bold tracking-tight">${totalSpent.toLocaleString()}</h2>
-            <p className="text-indigo-200 mb-1">/ ${totalBudget.toLocaleString()}</p>
+            <h2 className="text-4xl font-bold tracking-tight">{formatCurrency(totalSpent)}</h2>
+            <p className="text-indigo-200 mb-1">/ {formatCurrency(totalBudget)}</p>
           </div>
           
           <div className="mt-5">
             <div className="flex justify-between text-xs mb-1 text-indigo-100">
               <span>{totalPercentage}% Used</span>
-              <span>${Math.max(0, totalBudget - totalSpent).toLocaleString()} Left</span>
+              <span>{formatCurrency(Math.max(0, totalBudget - totalSpent))} Left</span>
             </div>
             <div className="w-full bg-indigo-900/50 rounded-full h-2">
               <div 
@@ -204,8 +204,8 @@ export default function BudgetsView() {
                   <h3 className="font-semibold text-gray-900">{data.name}</h3>
                   <p className="text-xs text-gray-500">
                     {data.budget > 0 
-                      ? `$${data.spent.toLocaleString()} of $${data.budget.toLocaleString()}`
-                      : `$${data.spent.toLocaleString()} spent`}
+                      ? `${formatCurrency(data.spent)} of ${formatCurrency(data.budget)}`
+                      : `${formatCurrency(data.spent)} spent`}
                   </p>
                 </div>
               </div>
@@ -226,8 +226,8 @@ export default function BudgetsView() {
                     </span>
                     <span className={data.isOverBudget ? 'text-rose-600 font-bold' : data.isNearBudget ? 'text-amber-600 font-bold' : 'text-gray-500'}>
                       {data.isOverBudget 
-                        ? `$${(data.spent - data.budget).toLocaleString()} Over` 
-                        : `$${(data.budget - data.spent).toLocaleString()} Left`}
+                        ? `${formatCurrency(data.spent - data.budget)} Over` 
+                        : `${formatCurrency(data.budget - data.spent)} Left`}
                     </span>
                   </div>
                   <div className="w-full bg-gray-100 rounded-full h-2">
@@ -241,7 +241,7 @@ export default function BudgetsView() {
                     <div className="mt-3 flex items-start space-x-2 text-rose-700 bg-rose-100/50 p-2.5 rounded-xl border border-rose-100">
                       <AlertCircle size={16} className="mt-0.5 shrink-0 text-rose-500" />
                       <p className="text-xs font-medium leading-relaxed">
-                        You've exceeded your {data.name} budget by <span className="font-bold">${(data.spent - data.budget).toLocaleString()}</span>. Consider reducing expenses here.
+                        You've exceeded your {data.name} budget by <span className="font-bold">{formatCurrency(data.spent - data.budget)}</span>. Consider reducing expenses here.
                       </p>
                     </div>
                   )}
@@ -297,7 +297,7 @@ export default function BudgetsView() {
                     return (
                       <div key={i} className="flex-1 flex flex-col items-center justify-end h-full group relative">
                         <div className="absolute -top-8 bg-gray-800 text-white text-[10px] py-1 px-2 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10 pointer-events-none">
-                          ${h.spent.toLocaleString()}
+                          {formatCurrency(h.spent)}
                         </div>
                         
                         <div className="w-full flex justify-center h-[80%] items-end">

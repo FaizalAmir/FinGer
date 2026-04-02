@@ -4,7 +4,7 @@ import { Plus, Target, ChevronDown, ChevronUp, DollarSign, Edit2, Search, Downlo
 import { Debt } from '../types';
 
 const PaymentHistory: React.FC<{ debt: Debt }> = ({ debt }) => {
-  const { fetchDebtPayments, editDebtPayment, deleteDebtPayment } = useFinance();
+  const { fetchDebtPayments, editDebtPayment, deleteDebtPayment, formatCurrency } = useFinance();
   const [payments, setPayments] = useState<any[]>([]);
   const [total, setTotal] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
@@ -154,7 +154,7 @@ const PaymentHistory: React.FC<{ debt: Debt }> = ({ debt }) => {
                   <span className="text-xs font-medium text-gray-600">
                     {new Date(payment.date).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}
                   </span>
-                  <span className="text-sm font-bold text-emerald-600">+${payment.amount.toLocaleString()}</span>
+                  <span className="text-sm font-bold text-emerald-600">+{formatCurrency(payment.amount)}</span>
                 </div>
                 {payment.note && (
                   <p className="text-xs text-gray-500 mt-1.5 pr-12">{payment.note}</p>
@@ -195,7 +195,7 @@ const PaymentHistory: React.FC<{ debt: Debt }> = ({ debt }) => {
 };
 
 export default function DebtsView() {
-  const { debts, addDebt, editDebt, addDebtPayment } = useFinance();
+  const { debts, addDebt, editDebt, addDebtPayment, formatCurrency } = useFinance();
   const [showAdd, setShowAdd] = useState(false);
   
   const [name, setName] = useState('');
@@ -279,9 +279,9 @@ export default function DebtsView() {
     const remaining = debt.totalAmount - debt.paidAmount;
     const dueDate = new Date(debt.dueDate).toLocaleDateString();
     const message = `Halo, ini detail tagihan untuk *${debt.name}*:\n\n` +
-                    `Total Tagihan: $${debt.totalAmount.toLocaleString()}\n` +
-                    `Sudah Dibayar: $${debt.paidAmount.toLocaleString()}\n` +
-                    `Sisa Tagihan: $${remaining.toLocaleString()}\n` +
+                    `Total Tagihan: ${formatCurrency(debt.totalAmount)}\n` +
+                    `Sudah Dibayar: ${formatCurrency(debt.paidAmount)}\n` +
+                    `Sisa Tagihan: ${formatCurrency(remaining)}\n` +
                     `Jatuh Tempo: ${dueDate}\n\n` +
                     `Terima kasih!`;
     const whatsappUrl = `https://wa.me/?text=${encodeURIComponent(message)}`;
@@ -323,7 +323,7 @@ export default function DebtsView() {
         </div>
         <div>
           <p className="text-sm text-gray-500 font-medium">Total Remaining</p>
-          <p className="text-2xl font-bold text-gray-900">${totalRemaining.toLocaleString()}</p>
+          <p className="text-2xl font-bold text-gray-900">{formatCurrency(totalRemaining)}</p>
         </div>
       </div>
 
@@ -393,8 +393,8 @@ export default function DebtsView() {
                   <p className="text-xs text-gray-500">Due: {new Date(debt.dueDate).toLocaleDateString()}</p>
                 </div>
                 <div className="text-right">
-                  <p className="font-bold text-gray-900">${remaining.toLocaleString()}</p>
-                  <p className="text-xs text-gray-500">left of ${debt.totalAmount.toLocaleString()}</p>
+                  <p className="font-bold text-gray-900">{formatCurrency(remaining)}</p>
+                  <p className="text-xs text-gray-500">left of {formatCurrency(debt.totalAmount)}</p>
                 </div>
               </div>
               
@@ -405,7 +405,7 @@ export default function DebtsView() {
               <div className="mt-4 mb-4">
                 <div className="flex justify-between text-xs mb-1">
                   <span className="font-medium text-indigo-600">{progress}% Paid</span>
-                  <span className="text-gray-500">${debt.paidAmount.toLocaleString()}</span>
+                  <span className="text-gray-500">{formatCurrency(debt.paidAmount)}</span>
                 </div>
                 <div className="w-full bg-gray-100 rounded-full h-2.5">
                   <div 
@@ -625,13 +625,13 @@ export default function DebtsView() {
                       onClick={() => setPaymentAmount(maxPayment.toString())}
                       className="text-xs text-indigo-600 hover:text-indigo-800 font-medium"
                     >
-                      Max: ${maxPayment.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      Max: {formatCurrency(maxPayment)}
                     </button>
                   )}
                 </div>
                 <div className="relative">
                   <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                    <span className="text-gray-500 sm:text-sm">$</span>
+                    <span className="text-gray-500 sm:text-sm"></span>
                   </div>
                   <input
                     type="number"

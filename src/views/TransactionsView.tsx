@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useFinance } from '../FinanceContext';
-import { Plus, ArrowUpRight, ArrowDownRight, Search, Edit2, Loader2 } from 'lucide-react';
+import { Plus, ArrowUpRight, ArrowDownRight, Search, Edit2, Loader2, Filter, X } from 'lucide-react';
 import { TransactionType, Transaction } from '../types';
 
 export default function TransactionsView() {
-  const { categories, addTransaction, editTransaction, fetchTransactions } = useFinance();
+  const { categories, addTransaction, editTransaction, deleteTransaction, fetchTransactions, formatCurrency } = useFinance();
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [totalTransactions, setTotalTransactions] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
@@ -18,6 +18,14 @@ export default function TransactionsView() {
   const [searchQuery, setSearchQuery] = useState('');
   const [filterType, setFilterType] = useState<'all' | 'income' | 'expense'>('all');
   const [visibleCount, setVisibleCount] = useState(20);
+
+  // Advanced Filters
+  const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
+  const [filterCategoryId, setFilterCategoryId] = useState('all');
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
+  const [minAmount, setMinAmount] = useState('');
+  const [maxAmount, setMaxAmount] = useState('');
 
   const [editingTransactionId, setEditingTransactionId] = useState<string | null>(null);
   const [editAmount, setEditAmount] = useState('');
@@ -37,7 +45,16 @@ export default function TransactionsView() {
     try {
       const limit = isLoadMore ? 20 : visibleCount;
       const offset = isLoadMore ? transactions.length : 0;
-      const result = await fetchTransactions(limit, offset, searchQuery, filterType);
+      const filters = {
+        search: searchQuery,
+        type: filterType,
+        categoryId: filterCategoryId,
+        startDate: startDate || undefined,
+        endDate: endDate || undefined,
+        minAmount: minAmount ? parseFloat(minAmount) : undefined,
+        maxAmount: maxAmount ? parseFloat(maxAmount) : undefined,
+      };
+      const result = await fetchTransactions(limit, offset, filters);
       
       if (isLoadMore) {
         setTransactions(prev => [...prev, ...result.data]);
@@ -50,11 +67,11 @@ export default function TransactionsView() {
     } finally {
       setIsLoading(false);
     }
-  }, [fetchTransactions, searchQuery, filterType, visibleCount, transactions.length]);
+  }, [fetchTransactions, searchQuery, filterType, filterCategoryId, startDate, endDate, minAmount, maxAmount, visibleCount, transactions.length]);
 
   useEffect(() => {
     loadTransactions();
-  }, [searchQuery, filterType]); // Reload when search or filter changes
+  }, [searchQuery, filterType, filterCategoryId, startDate, endDate, minAmount, maxAmount]); // Reload when search or filter changes
 
   const handleLoadMore = () => {
     setVisibleCount(prev => prev + 20);
@@ -127,6 +144,19 @@ export default function TransactionsView() {
     }
   };
 
+  const handleDelete = () => {
+    if (editingTransactionId) {
+      setConfirmMessage('Are you sure you want to delete this transaction? This action cannot be undone.');
+      setConfirmAction(() => async () => {
+        await deleteTransaction(editingTransactionId);
+        setEditingTransactionId(null);
+        setShowConfirm(false);
+        loadTransactions(); // Reload after deleting
+      });
+      setShowConfirm(true);
+    }
+  };
+
   return (
     <div className="p-6 bg-gray-50 min-h-full relative">
       <div className="flex justify-between items-center mb-6">
@@ -140,7 +170,7 @@ export default function TransactionsView() {
       </div>
 
       {/* Search and Filter */}
-      <div className="mb-6 flex space-x-3">
+      <div className="mb-4 flex space-x-3">
         <div className="relative flex-1">
           <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
             <Search size={18} className="text-gray-400" />
@@ -162,7 +192,91 @@ export default function TransactionsView() {
           <option value="income">Income</option>
           <option value="expense">Expense</option>
         </select>
+        <button
+          onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}
+          className={`px-3 py-3 border rounded-xl flex items-center justify-center transition-colors shadow-sm ${showAdvancedFilters ? 'bg-indigo-50 border-indigo-200 text-indigo-600' : 'bg-white border-gray-200 text-gray-500 hover:bg-gray-50'}`}
+          title="Advanced Filters"
+        >
+          <Filter size={18} />
+        </button>
       </div>
+
+      {/* Advanced Filters Panel */}
+      {showAdvancedFilters && (
+        <div className="mb-6 p-4 bg-white rounded-2xl border border-gray-200 shadow-sm animate-in slide-in-from-top-2">
+          <div className="flex justify-between items-center mb-4">
+            <h3 className="text-sm font-semibold text-gray-700 flex items-center">
+              <Filter size={14} className="mr-2" />
+              Advanced Filters
+            </h3>
+            <button
+              onClick={() => {
+                setFilterCategoryId('all');
+                setStartDate('');
+                setEndDate('');
+                setMinAmount('');
+                setMaxAmount('');
+              }}
+              className="text-xs text-indigo-600 hover:text-indigo-800 font-medium"
+            >
+              Clear Filters
+            </button>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+            <div className="lg:col-span-1">
+              <label className="block text-xs font-medium text-gray-500 mb-1">Category</label>
+              <select
+                value={filterCategoryId}
+                onChange={(e) => setFilterCategoryId(e.target.value)}
+                className="w-full p-2.5 border border-gray-200 rounded-xl text-sm bg-gray-50 focus:bg-white focus:ring-2 focus:ring-indigo-500"
+              >
+                <option value="all">All Categories</option>
+                {categories.map(c => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+            </div>
+            <div className="sm:col-span-2 lg:col-span-2">
+              <label className="block text-xs font-medium text-gray-500 mb-1">Date Range</label>
+              <div className="flex items-center space-x-2">
+                <input
+                  type="date"
+                  value={startDate}
+                  onChange={(e) => setStartDate(e.target.value)}
+                  className="flex-1 min-w-0 p-2.5 border border-gray-200 rounded-xl text-sm bg-gray-50 focus:bg-white focus:ring-2 focus:ring-indigo-500"
+                />
+                <span className="text-gray-400 shrink-0">-</span>
+                <input
+                  type="date"
+                  value={endDate}
+                  onChange={(e) => setEndDate(e.target.value)}
+                  className="flex-1 min-w-0 p-2.5 border border-gray-200 rounded-xl text-sm bg-gray-50 focus:bg-white focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+            </div>
+            <div className="lg:col-span-1">
+              <label className="block text-xs font-medium text-gray-500 mb-1">Min Amount</label>
+              <input
+                type="number"
+                value={minAmount}
+                onChange={(e) => setMinAmount(e.target.value)}
+                placeholder="0.00"
+                className="w-full p-2.5 border border-gray-200 rounded-xl text-sm bg-gray-50 focus:bg-white focus:ring-2 focus:ring-indigo-500"
+              />
+            </div>
+            <div className="lg:col-span-1">
+              <label className="block text-xs font-medium text-gray-500 mb-1">Max Amount</label>
+              <input
+                type="number"
+                value={maxAmount}
+                onChange={(e) => setMaxAmount(e.target.value)}
+                placeholder="0.00"
+                className="w-full p-2.5 border border-gray-200 rounded-xl text-sm bg-gray-50 focus:bg-white focus:ring-2 focus:ring-indigo-500"
+              />
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="space-y-3">
         {transactions.map((t) => {
@@ -188,7 +302,7 @@ export default function TransactionsView() {
               </div>
               <div className="flex items-center space-x-3 shrink-0">
                 <div className={`font-bold ${isIncome ? 'text-emerald-600' : 'text-gray-900'}`}>
-                  {isIncome ? '+' : '-'}${t.amount.toLocaleString()}
+                  {isIncome ? '+' : '-'}{formatCurrency(t.amount)}
                 </div>
                 <button 
                   onClick={(e) => {
@@ -258,7 +372,7 @@ export default function TransactionsView() {
                 <label className="block text-xs font-medium text-gray-700 mb-1">Amount</label>
                 <div className="relative">
                   <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                    <span className="text-gray-500 sm:text-sm">$</span>
+                    <span className="text-gray-500 sm:text-sm"></span>
                   </div>
                   <input
                     type="number"
@@ -361,7 +475,7 @@ export default function TransactionsView() {
                 <label className="block text-xs font-medium text-gray-700 mb-1">Amount</label>
                 <div className="relative">
                   <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                    <span className="text-gray-500 sm:text-sm">$</span>
+                    <span className="text-gray-500 sm:text-sm"></span>
                   </div>
                   <input
                     type="number"
@@ -414,12 +528,21 @@ export default function TransactionsView() {
                 />
               </div>
 
-              <button
-                type="submit"
-                className="w-full py-3 px-4 border border-transparent rounded-xl shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 mt-6"
-              >
-                Save Changes
-              </button>
+              <div className="flex space-x-3 mt-6">
+                <button
+                  type="button"
+                  onClick={handleDelete}
+                  className="flex-1 py-3 px-4 border border-red-200 rounded-xl shadow-sm text-sm font-medium text-red-600 bg-white hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500"
+                >
+                  Delete
+                </button>
+                <button
+                  type="submit"
+                  className="flex-[2] py-3 px-4 border border-transparent rounded-xl shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+                >
+                  Save Changes
+                </button>
+              </div>
             </form>
           </div>
         </div>
@@ -452,7 +575,7 @@ export default function TransactionsView() {
                   
                   <div className="text-center">
                     <div className={`text-3xl font-bold ${isIncome ? 'text-emerald-600' : 'text-gray-900'}`}>
-                      {isIncome ? '+' : '-'}${viewingTransaction.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      {isIncome ? '+' : '-'}{formatCurrency(viewingTransaction.amount)}
                     </div>
                     <p className="text-gray-500 font-medium mt-1">{category?.name || 'Unknown Category'}</p>
                   </div>

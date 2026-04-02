@@ -12,6 +12,17 @@ export interface DashboardStats {
   expensesByCategory: { id: string; name: string; color: string; value: number }[];
   currentMonthSpentByCategory: { categoryId: string; spent: number }[];
   past6MonthsSpentByCategory: { categoryId: string; monthStr: string; spent: number }[];
+  past6MonthsIncomeVsExpense: { monthStr: string; income: number; expense: number }[];
+}
+
+export interface TransactionFilters {
+  search?: string;
+  type?: string;
+  categoryId?: string;
+  startDate?: string;
+  endDate?: string;
+  minAmount?: number;
+  maxAmount?: number;
 }
 
 interface FinanceContextType {
@@ -21,10 +32,11 @@ interface FinanceContextType {
   categories: Category[];
   debts: Debt[];
   dashboardStats: DashboardStats | null;
-  fetchTransactions: (limit: number, offset: number, search?: string, type?: string) => Promise<{ data: Transaction[], total: number }>;
+  fetchTransactions: (limit: number, offset: number, filters?: TransactionFilters) => Promise<{ data: Transaction[], total: number }>;
   fetchDebtPayments: (debtId: string, limit: number, offset: number) => Promise<{ data: any[], total: number }>;
   addTransaction: (t: Omit<Transaction, 'id'>) => Promise<void>;
   editTransaction: (id: string, updatedTransaction: Partial<Transaction>) => Promise<void>;
+  deleteTransaction: (id: string) => Promise<void>;
   addDebt: (d: Omit<Debt, 'id'>) => void;
   editDebt: (id: string, updatedDebt: Partial<Debt>) => void;
   addDebtPayment: (debtId: string, amount: number, date: string, note?: string) => void;
@@ -37,6 +49,9 @@ interface FinanceContextType {
   restoreFromSupabase: () => Promise<{ success: boolean; message?: string; error?: string }>;
   isLoading: boolean;
   refreshDashboardStats: () => Promise<void>;
+  currency: string;
+  updateCurrency: (newCurrency: string) => void;
+  formatCurrency: (amount: number) => string;
 }
 
 const FinanceContext = createContext<FinanceContextType | undefined>(undefined);
@@ -44,10 +59,25 @@ const FinanceContext = createContext<FinanceContextType | undefined>(undefined);
 export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [token, setToken] = useState<string | null>(localStorage.getItem('finance_token'));
+  const [currency, setCurrency] = useState<string>(localStorage.getItem('finance_currency') || 'USD');
   const [categories, setCategories] = useState<Category[]>([]);
   const [debts, setDebts] = useState<Debt[]>([]);
   const [dashboardStats, setDashboardStats] = useState<DashboardStats | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+
+  const updateCurrency = (newCurrency: string) => {
+    setCurrency(newCurrency);
+    localStorage.setItem('finance_currency', newCurrency);
+  };
+
+  const formatCurrency = useCallback((amount: number) => {
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: currency,
+      minimumFractionDigits: amount % 1 === 0 ? 0 : 2,
+      maximumFractionDigits: 2
+    }).format(amount);
+  }, [currency]);
 
   const refreshDashboardStats = useCallback(async () => {
     if (!user) return;
@@ -81,18 +111,34 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
       const expensesByCategoryMap: Record<string, number> = {};
       const currentMonthSpentByCategoryMap: Record<string, number> = {};
       const past6MonthsSpentByCategoryMap: Record<string, Record<string, number>> = {};
+      const past6MonthsIncomeVsExpenseMap: Record<string, { income: number; expense: number }> = {};
 
       const sixMonthsAgo = new Date();
       sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 5);
       sixMonthsAgo.setDate(1);
       sixMonthsAgo.setHours(0, 0, 0, 0);
 
+      // Initialize the last 6 months
+      for (let i = 5; i >= 0; i--) {
+        const d = new Date();
+        d.setMonth(d.getMonth() - i);
+        const monthStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+        past6MonthsIncomeVsExpenseMap[monthStr] = { income: 0, expense: 0 };
+      }
+
       transactions.forEach(t => {
         const amount = Number(t.amount);
+        const tDate = new Date(t.date);
+        const monthStr = `${tDate.getFullYear()}-${String(tDate.getMonth() + 1).padStart(2, '0')}`;
+
         if (t.type === 'income') {
           totalIncome += amount;
           if (t.date.startsWith(currentMonthStr)) currentMonthIncome += amount;
           if (t.date.startsWith(prevMonthStr)) prevMonthIncome += amount;
+          
+          if (past6MonthsIncomeVsExpenseMap[monthStr]) {
+            past6MonthsIncomeVsExpenseMap[monthStr].income += amount;
+          }
         } else if (t.type === 'expense') {
           totalExpense += amount;
           if (t.date.startsWith(currentMonthStr)) {
@@ -103,11 +149,13 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
           
           expensesByCategoryMap[t.categoryid] = (expensesByCategoryMap[t.categoryid] || 0) + amount;
 
-          const tDate = new Date(t.date);
           if (tDate >= sixMonthsAgo) {
-            const monthStr = `${tDate.getFullYear()}-${String(tDate.getMonth() + 1).padStart(2, '0')}`;
             if (!past6MonthsSpentByCategoryMap[t.categoryid]) past6MonthsSpentByCategoryMap[t.categoryid] = {};
             past6MonthsSpentByCategoryMap[t.categoryid][monthStr] = (past6MonthsSpentByCategoryMap[t.categoryid][monthStr] || 0) + amount;
+          }
+          
+          if (past6MonthsIncomeVsExpenseMap[monthStr]) {
+            past6MonthsIncomeVsExpenseMap[monthStr].expense += amount;
           }
         }
       });
@@ -126,6 +174,12 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
         });
       });
 
+      const past6MonthsIncomeVsExpense = Object.entries(past6MonthsIncomeVsExpenseMap).map(([monthStr, data]) => ({
+        monthStr,
+        income: data.income,
+        expense: data.expense
+      })).sort((a, b) => a.monthStr.localeCompare(b.monthStr));
+
       setDashboardStats({
         totalIncome,
         totalExpense,
@@ -135,7 +189,8 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
         prevMonthExpense,
         expensesByCategory,
         currentMonthSpentByCategory,
-        past6MonthsSpentByCategory
+        past6MonthsSpentByCategory,
+        past6MonthsIncomeVsExpense
       });
     } catch (error) {
       console.error('Failed to fetch dashboard stats:', error);
@@ -210,16 +265,31 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
     setDashboardStats(null);
   };
 
-  const fetchTransactions = async (limit: number, offset: number, search?: string, type?: string) => {
+  const fetchTransactions = async (limit: number, offset: number, filters?: TransactionFilters) => {
     if (!user) return { data: [], total: 0 };
     try {
       let query = supabase.from('transactions').select('*', { count: 'exact' }).eq('userid', user.id);
       
-      if (type && type !== 'all') {
-        query = query.eq('type', type);
+      if (filters?.type && filters.type !== 'all') {
+        query = query.eq('type', filters.type);
       }
-      if (search) {
-        query = query.ilike('note', `%${search}%`);
+      if (filters?.search) {
+        query = query.ilike('note', `%${filters.search}%`);
+      }
+      if (filters?.categoryId && filters.categoryId !== 'all') {
+        query = query.eq('categoryid', filters.categoryId);
+      }
+      if (filters?.startDate) {
+        query = query.gte('date', filters.startDate);
+      }
+      if (filters?.endDate) {
+        query = query.lte('date', filters.endDate);
+      }
+      if (filters?.minAmount !== undefined && !isNaN(filters.minAmount)) {
+        query = query.gte('amount', filters.minAmount);
+      }
+      if (filters?.maxAmount !== undefined && !isNaN(filters.maxAmount)) {
+        query = query.lte('amount', filters.maxAmount);
       }
       
       query = query.order('date', { ascending: false }).range(offset, offset + limit - 1);
@@ -292,6 +362,16 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
       await refreshDashboardStats();
     } catch (error) {
       console.error('Failed to edit transaction:', error);
+    }
+  };
+
+  const deleteTransaction = async (id: string) => {
+    if (!user) return;
+    try {
+      await supabase.from('transactions').delete().eq('id', id).eq('userid', user.id);
+      await refreshDashboardStats();
+    } catch (error) {
+      console.error('Failed to delete transaction:', error);
     }
   };
 
@@ -476,7 +556,7 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
   };
 
   return (
-    <FinanceContext.Provider value={{ user, login, logout, categories, debts, dashboardStats, fetchTransactions, fetchDebtPayments, addTransaction, editTransaction, addDebt, editDebt, addDebtPayment, editDebtPayment, deleteDebtPayment, addCategory, editCategory, deleteCategory, backupToSupabase, restoreFromSupabase, isLoading, refreshDashboardStats }}>
+    <FinanceContext.Provider value={{ user, login, logout, categories, debts, dashboardStats, fetchTransactions, fetchDebtPayments, addTransaction, editTransaction, deleteTransaction, addDebt, editDebt, addDebtPayment, editDebtPayment, deleteDebtPayment, addCategory, editCategory, deleteCategory, backupToSupabase, restoreFromSupabase, isLoading, refreshDashboardStats, currency, updateCurrency, formatCurrency }}>
       {isLoading ? (
         <div className="min-h-screen flex items-center justify-center bg-gray-50">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600"></div>

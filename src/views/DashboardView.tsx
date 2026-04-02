@@ -1,10 +1,10 @@
 import React from 'react';
 import { useFinance } from '../FinanceContext';
-import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
+import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, BarChart, Bar, XAxis, YAxis, CartesianGrid, Legend } from 'recharts';
 import { ArrowDownRight, ArrowUpRight, Wallet, LogOut, TrendingUp, TrendingDown } from 'lucide-react';
 
 export default function DashboardView() {
-  const { user, categories, logout, dashboardStats } = useFinance();
+  const { user, categories, logout, dashboardStats, formatCurrency, currency, updateCurrency } = useFinance();
 
   const totalIncome = dashboardStats?.totalIncome || 0;
   const totalExpense = dashboardStats?.totalExpense || 0;
@@ -43,6 +43,20 @@ export default function DashboardView() {
           <h1 className="text-2xl font-bold text-gray-900">{user?.name}</h1>
         </div>
         <div className="flex items-center space-x-2">
+          <select
+            value={currency}
+            onChange={(e) => updateCurrency(e.target.value)}
+            className="p-2 bg-white rounded-xl shadow-sm text-gray-600 border-none focus:ring-2 focus:ring-indigo-500 text-sm font-medium outline-none cursor-pointer"
+          >
+            <option value="USD">USD</option>
+            <option value="EUR">EUR</option>
+            <option value="IDR">IDR</option>
+            <option value="GBP">GBP</option>
+            <option value="JPY">JPY</option>
+            <option value="AUD">AUD</option>
+            <option value="CAD">CAD</option>
+            <option value="SGD">SGD</option>
+          </select>
           <button onClick={logout} className="p-2 bg-white rounded-full shadow-sm text-gray-400 hover:text-gray-600 transition-colors">
             <LogOut size={20} />
           </button>
@@ -63,8 +77,8 @@ export default function DashboardView() {
                 </h4>
                 <p className={`text-xs mt-0.5 ${alert.isOverBudget ? 'text-rose-700' : 'text-amber-700'}`}>
                   {alert.isOverBudget 
-                    ? `You've exceeded your budget by $${(alert.spent - alert.budget!).toLocaleString()}.`
-                    : `You've reached ${alert.percentage}% of your $${alert.budget!.toLocaleString()} budget.`}
+                    ? `You've exceeded your budget by ${formatCurrency(alert.spent - alert.budget!)}.`
+                    : `You've reached ${alert.percentage}% of your ${formatCurrency(alert.budget!)} budget.`}
                 </p>
               </div>
             </div>
@@ -82,7 +96,7 @@ export default function DashboardView() {
             <Wallet size={18} />
             <span className="text-sm font-medium">Total Balance</span>
           </div>
-          <h2 className="text-4xl font-bold tracking-tight">${balance.toLocaleString('en-US', { minimumFractionDigits: 2 })}</h2>
+          <h2 className="text-4xl font-bold tracking-tight">{formatCurrency(balance)}</h2>
           
           <div className="flex justify-between mt-6 pt-4 border-t border-white/20">
             <div>
@@ -90,14 +104,14 @@ export default function DashboardView() {
                 <ArrowDownRight size={14} />
                 <span>Total Income</span>
               </div>
-              <p className="font-semibold">${totalIncome.toLocaleString()}</p>
+              <p className="font-semibold">{formatCurrency(totalIncome)}</p>
             </div>
             <div>
               <div className="flex items-center space-x-1 text-indigo-100 text-xs mb-1">
                 <ArrowUpRight size={14} />
                 <span>Total Expenses</span>
               </div>
-              <p className="font-semibold">${totalExpense.toLocaleString()}</p>
+              <p className="font-semibold">{formatCurrency(totalExpense)}</p>
             </div>
           </div>
         </div>
@@ -107,7 +121,7 @@ export default function DashboardView() {
       <div className="grid grid-cols-2 gap-4">
         <div className="bg-white p-4 rounded-3xl shadow-sm border border-gray-100">
           <p className="text-xs text-gray-500 font-medium mb-1">Income (This Month)</p>
-          <p className="text-xl font-bold text-gray-900">${currentMonthIncome.toLocaleString()}</p>
+          <p className="text-xl font-bold text-gray-900">{formatCurrency(currentMonthIncome)}</p>
           <div className={`flex items-center mt-2 text-xs font-medium ${incomeChange >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
             {incomeChange >= 0 ? <TrendingUp size={14} className="mr-1" /> : <TrendingDown size={14} className="mr-1" />}
             <span>{Math.abs(incomeChange)}% vs last month</span>
@@ -115,7 +129,7 @@ export default function DashboardView() {
         </div>
         <div className="bg-white p-4 rounded-3xl shadow-sm border border-gray-100">
           <p className="text-xs text-gray-500 font-medium mb-1">Expenses (This Month)</p>
-          <p className="text-xl font-bold text-gray-900">${currentMonthExpense.toLocaleString()}</p>
+          <p className="text-xl font-bold text-gray-900">{formatCurrency(currentMonthExpense)}</p>
           <div className={`flex items-center mt-2 text-xs font-medium ${expenseChange <= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
             {expenseChange <= 0 ? <TrendingDown size={14} className="mr-1" /> : <TrendingUp size={14} className="mr-1" />}
             <span>{Math.abs(expenseChange)}% vs last month</span>
@@ -124,47 +138,102 @@ export default function DashboardView() {
       </div>
 
       {/* Chart Section */}
-      <div>
-        <h3 className="text-lg font-bold text-gray-900 mb-4">Expenses by Category</h3>
-        <div className="bg-white p-4 rounded-3xl shadow-sm border border-gray-100">
-          {expensesByCategory.length > 0 ? (
-            <div className="h-48">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={expensesByCategory}
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={60}
-                    outerRadius={80}
-                    paddingAngle={5}
-                    dataKey="value"
+      <div className="space-y-6">
+        <div>
+          <h3 className="text-lg font-bold text-gray-900 mb-4">Income vs Expenses (Last 6 Months)</h3>
+          <div className="bg-white p-4 rounded-3xl shadow-sm border border-gray-100">
+            {dashboardStats?.past6MonthsIncomeVsExpense && dashboardStats.past6MonthsIncomeVsExpense.length > 0 ? (
+              <div className="h-64">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart
+                    data={dashboardStats.past6MonthsIncomeVsExpense}
+                    margin={{ top: 10, right: 10, left: -20, bottom: 0 }}
                   >
-                    {expensesByCategory.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={entry.color} />
-                    ))}
-                  </Pie>
-                  <Tooltip 
-                    formatter={(value: number) => `$${value}`}
-                    contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
-                  />
-                </PieChart>
-              </ResponsiveContainer>
-            </div>
-          ) : (
-            <div className="h-48 flex items-center justify-center text-gray-400 text-sm">
-              No expenses yet
-            </div>
-          )}
-          
-          <div className="grid grid-cols-2 gap-3 mt-2">
-            {expensesByCategory.map((c) => (
-              <div key={c.name} className="flex items-center space-x-2">
-                <div className="w-3 h-3 rounded-full" style={{ backgroundColor: c.color }}></div>
-                <span className="text-xs text-gray-600 truncate">{c.name}</span>
-                <span className="text-xs font-semibold text-gray-900 ml-auto">${c.value}</span>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f3f4f6" />
+                    <XAxis 
+                      dataKey="monthStr" 
+                      tickFormatter={(value) => {
+                        const [year, month] = value.split('-');
+                        const date = new Date(parseInt(year), parseInt(month) - 1);
+                        return date.toLocaleDateString('en-US', { month: 'short' });
+                      }}
+                      axisLine={false}
+                      tickLine={false}
+                      tick={{ fontSize: 12, fill: '#6b7280' }}
+                      dy={10}
+                    />
+                    <YAxis 
+                      axisLine={false}
+                      tickLine={false}
+                      tick={{ fontSize: 12, fill: '#6b7280' }}
+                      tickFormatter={(value) => `$${value >= 1000 ? (value / 1000).toFixed(1) + 'k' : value}`}
+                    />
+                    <Tooltip
+                      formatter={(value: number) => [formatCurrency(value), undefined]}
+                      labelFormatter={(label: string) => {
+                        const [year, month] = label.split('-');
+                        const date = new Date(parseInt(year), parseInt(month) - 1);
+                        return date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+                      }}
+                      contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+                      cursor={{ fill: '#f9fafb' }}
+                    />
+                    <Legend iconType="circle" wrapperStyle={{ fontSize: '12px', paddingTop: '10px' }} />
+                    <Bar dataKey="income" name="Income" fill="#10b981" radius={[4, 4, 0, 0]} maxBarSize={40} />
+                    <Bar dataKey="expense" name="Expenses" fill="#f43f5e" radius={[4, 4, 0, 0]} maxBarSize={40} />
+                  </BarChart>
+                </ResponsiveContainer>
               </div>
-            ))}
+            ) : (
+              <div className="h-48 flex items-center justify-center text-gray-400 text-sm">
+                No data available
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div>
+          <h3 className="text-lg font-bold text-gray-900 mb-4">Expenses by Category</h3>
+          <div className="bg-white p-4 rounded-3xl shadow-sm border border-gray-100">
+            {expensesByCategory.length > 0 ? (
+              <div className="h-48">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={expensesByCategory}
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={60}
+                      outerRadius={80}
+                      paddingAngle={5}
+                      dataKey="value"
+                    >
+                      {expensesByCategory.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={entry.color} />
+                      ))}
+                    </Pie>
+                    <Tooltip 
+                      formatter={(value: number) => formatCurrency(value)}
+                      contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+                    />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+            ) : (
+              <div className="h-48 flex items-center justify-center text-gray-400 text-sm">
+                No expenses yet
+              </div>
+            )}
+            
+            <div className="grid grid-cols-2 gap-3 mt-2">
+              {expensesByCategory.map((c) => (
+                <div key={c.name} className="flex items-center space-x-2">
+                  <div className="w-3 h-3 rounded-full" style={{ backgroundColor: c.color }}></div>
+                  <span className="text-xs text-gray-600 truncate">{c.name}</span>
+                  <span className="text-xs font-semibold text-gray-900 ml-auto">{formatCurrency(c.value)}</span>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       </div>
